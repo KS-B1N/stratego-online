@@ -1,13 +1,16 @@
 import {
   applyMove,
+  buildSetupFromSerialized,
   cellKey,
   ClientMessage,
   createEmptyGame,
   GameState,
   generateDefaultSetup,
   listValidMoves,
+  Piece,
   PlayerColor,
-  ServerMessage
+  ServerMessage,
+  validateSetup
 } from "@stratego/game-core";
 import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
@@ -102,12 +105,19 @@ export class RoomManager {
         return;
       }
       case "lock_setup": {
-        if (!hasAnyPiecesForPlayer(room.game, session.color)) {
-          room.game.board = {
-            ...room.game.board,
-            ...generateDefaultSetup(session.color)
-          };
+        if (room.setupsLocked.has(session.color)) {
+          throw new Error("Your setup is already locked");
         }
+
+        const submittedSetup = Object.keys(message.setup).length
+          ? buildSetupFromSerialized(session.color, message.setup)
+          : generateDefaultSetup(session.color);
+        const errors = validateSetup(submittedSetup, session.color);
+        if (errors.length > 0) {
+          throw new Error(errors[0]);
+        }
+
+        room.game.board = replacePlayerSetup(room.game, session.color, submittedSetup);
 
         room.setupsLocked.add(session.color);
         if (room.setupsLocked.size === 2) {
@@ -175,10 +185,6 @@ function randomRoomCode(): string {
   return Math.random().toString(36).slice(2, 6).toUpperCase();
 }
 
-function hasAnyPiecesForPlayer(game: GameState, player: PlayerColor): boolean {
-  return Object.values(game.board).some((piece): boolean => Boolean(piece && piece.owner === player));
-}
-
 function assertPlayerControlsCell(game: GameState, player: PlayerColor, cell: { row: number; col: number }): void {
   if (game.currentTurn !== player) {
     throw new Error("It is not your turn");
@@ -192,4 +198,16 @@ function assertPlayerControlsCell(game: GameState, player: PlayerColor, cell: { 
   if (piece.owner !== player) {
     throw new Error("You can only move your own pieces");
   }
+}
+
+function replacePlayerSetup(
+  game: GameState,
+  player: PlayerColor,
+  setup: Record<string, Piece>
+): GameState["board"] {
+  const preservedEntries = Object.entries(game.board).filter(([, piece]) => piece?.owner !== player);
+  return {
+    ...Object.fromEntries(preservedEntries),
+    ...setup
+  };
 }

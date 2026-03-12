@@ -6,7 +6,10 @@ import {
   PlayerColor,
   ServerMessage,
   cellKey,
-  isLake
+  generateDefaultSetup,
+  isLake,
+  isSetupCellForPlayer,
+  serializeSetupPieces
 } from "@stratego/game-core";
 import "./styles.css";
 
@@ -26,12 +29,16 @@ type ClientState = {
   game?: GameState;
   selectedCell?: string;
   validMoves: string[];
+  localSetup: Record<string, Piece>;
+  setupLocked: boolean;
   status: string;
 };
 
 const state: ClientState = {
   roomCode: "",
   playerName: "",
+  localSetup: {},
+  setupLocked: false,
   validMoves: [],
   status: "Join a room to start."
 };
@@ -65,7 +72,8 @@ function render(): void {
               </label>
               <div class="actions">
                 <button id="joinButton">Join room</button>
-                <button id="lockButton" class="secondary">Lock setup</button>
+                <button id="lockButton" class="secondary">${state.setupLocked ? "Setup locked" : "Lock setup"}</button>
+                <button id="resetButton" class="secondary">Reset template</button>
               </div>
               <div class="status">${escapeHtml(state.status)}</div>
             </div>
@@ -103,6 +111,7 @@ function render(): void {
 function bindEvents(): void {
   document.querySelector<HTMLButtonElement>("#joinButton")?.addEventListener("click", joinRoom);
   document.querySelector<HTMLButtonElement>("#lockButton")?.addEventListener("click", lockSetup);
+  document.querySelector<HTMLButtonElement>("#resetButton")?.addEventListener("click", resetSetupTemplate);
   document.querySelector<HTMLInputElement>("#playerName")?.addEventListener("input", (event) => {
     state.playerName = (event.target as HTMLInputElement).value;
   });
@@ -157,15 +166,33 @@ function lockSetup(): void {
     return;
   }
 
+  if (!state.color) {
+    state.status = "Join a room first.";
+    render();
+    return;
+  }
+
+  if (state.setupLocked) {
+    state.status = "Your setup is already locked.";
+    render();
+    return;
+  }
+
   send({
     type: "lock_setup",
-    setup: {}
+    setup: serializeSetupPieces(state.localSetup)
   });
+  state.setupLocked = true;
   state.status = "Setup locked. Waiting for the other player.";
   render();
 }
 
 function onCellClick(key: string): void {
+  if (state.game?.status === "setup") {
+    handleSetupCellClick(key);
+    return;
+  }
+
   if (!state.game || state.game.status !== "active" || !state.color) {
     return;
   }
@@ -197,12 +224,73 @@ function onCellClick(key: string): void {
   });
 }
 
+function handleSetupCellClick(key: string): void {
+  if (!state.color || state.setupLocked) {
+    return;
+  }
+
+  const cell = parseKey(key);
+  if (!isSetupCellForPlayer(state.color, cell)) {
+    return;
+  }
+
+  const selectedKey = state.selectedCell;
+  const selectedPiece = selectedKey ? state.localSetup[selectedKey] : undefined;
+  const clickedPiece = state.localSetup[key];
+
+  if (!selectedKey) {
+    if (!clickedPiece) {
+      return;
+    }
+
+    state.selectedCell = key;
+    state.status = `Selected ${formatRank(clickedPiece.rank)} at ${key}. Click another setup cell to swap.`;
+    render();
+    return;
+  }
+
+  if (selectedKey === key) {
+    state.selectedCell = undefined;
+    state.status = "Selection cleared.";
+    render();
+    return;
+  }
+
+  state.localSetup = swapSetupPieces(state.localSetup, selectedKey, key);
+  state.selectedCell = undefined;
+  state.status = selectedPiece
+    ? `Moved ${formatRank(selectedPiece.rank)} to ${key}.`
+    : "Setup updated.";
+  render();
+}
+
+function resetSetupTemplate(): void {
+  if (!state.color) {
+    state.status = "Join a room first.";
+    render();
+    return;
+  }
+
+  if (state.setupLocked) {
+    state.status = "You already locked your setup.";
+    render();
+    return;
+  }
+
+  state.localSetup = generateDefaultSetup(state.color);
+  state.selectedCell = undefined;
+  state.status = "Reset to the default setup template.";
+  render();
+}
+
 function handleServerMessage(message: ServerMessage): void {
   switch (message.type) {
     case "room_joined":
       state.roomCode = message.roomCode;
       state.color = message.color;
       state.game = message.game;
+      state.localSetup = generateDefaultSetup(message.color);
+      state.setupLocked = false;
       state.status = `Joined room ${message.roomCode}.`;
       break;
     case "room_waiting":
@@ -212,6 +300,15 @@ function handleServerMessage(message: ServerMessage): void {
       state.game = message.game;
       state.selectedCell = undefined;
       state.validMoves = [];
+      if (message.game.status === "setup" && state.color) {
+        state.localSetup = {
+          ...extractSetupForPlayer(message.game, state.color),
+          ...state.localSetup
+        };
+      }
+      if (message.game.status === "active") {
+        state.setupLocked = true;
+      }
       state.status = describeUpdate(message.game, state.color);
       break;
     case "valid_moves":
@@ -237,9 +334,10 @@ function renderBoard(): string {
   for (let row = 0; row < BOARD_SIZE; row += 1) {
     for (let col = 0; col < BOARD_SIZE; col += 1) {
       const key = `${row},${col}`;
-      const piece = state.game?.board[key];
+      const piece = getDisplayPiece(key);
       const selectable = state.validMoves.includes(key);
       const selected = state.selectedCell === key;
+      const setupCell = Boolean(state.color && isSetupCellForPlayer(state.color, { row, col }));
 
       if (isLake({ row, col })) {
         cells.push(`<div class="cell lake">Lake</div>`);
@@ -248,7 +346,7 @@ function renderBoard(): string {
 
       cells.push(`
         <button
-          class="cell ${piece?.owner ?? ""} ${selectable ? "selectable" : ""} ${selected ? "selected" : ""}"
+          class="cell ${piece?.owner ?? ""} ${setupCell ? "setup-cell" : ""} ${selectable ? "selectable" : ""} ${selected ? "selected" : ""}"
           data-key="${key}"
         >
           ${piece ? renderPiece(piece) : ""}
@@ -263,10 +361,10 @@ function renderBoard(): string {
 function renderPiece(piece: Piece): string {
   const isMine = piece.owner === state.color;
   if (isMine || piece.revealed || state.game?.status !== "active") {
-    return `<strong>${piece.rank}</strong>`;
+    return `<span class="piece-rank">${getPieceLabel(piece)}</span><span class="piece-name">${formatRank(piece.rank)}</span>`;
   }
 
-  return "<strong>Hidden</strong>";
+  return "<span class=\"piece-rank\">?</span><span class=\"piece-name\">Hidden</span>";
 }
 
 function describeTurn(game?: GameState): string {
@@ -291,7 +389,7 @@ function describeUpdate(game: GameState, color?: PlayerColor): string {
   }
 
   if (game.status === "setup") {
-    return "Both players are joining and preparing their setups.";
+    return state.setupLocked ? "Waiting for the other player to lock a setup." : "Arrange your pieces, then lock setup.";
   }
 
   return game.currentTurn === color ? "Your move." : "Opponent's move.";
@@ -317,6 +415,72 @@ function escapeHtml(value: string): string {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function getDisplayPiece(key: string): Piece | undefined {
+  if (state.game?.status === "setup" && state.color) {
+    return state.localSetup[key] ?? state.game.board[key];
+  }
+
+  return state.game?.board[key];
+}
+
+function swapSetupPieces(setup: Record<string, Piece>, fromKey: string, toKey: string): Record<string, Piece> {
+  const nextSetup = { ...setup };
+  const fromPiece = nextSetup[fromKey];
+  const toPiece = nextSetup[toKey];
+
+  if (!fromPiece) {
+    return nextSetup;
+  }
+
+  nextSetup[toKey] = fromPiece;
+  if (toPiece) {
+    nextSetup[fromKey] = toPiece;
+  } else {
+    delete nextSetup[fromKey];
+  }
+
+  return nextSetup;
+}
+
+function getPieceLabel(piece: Piece): string {
+  switch (piece.rank) {
+    case "flag":
+      return "F";
+    case "bomb":
+      return "B";
+    case "spy":
+      return "S";
+    case "scout":
+      return "2";
+    case "miner":
+      return "3";
+    case "sergeant":
+      return "4";
+    case "lieutenant":
+      return "5";
+    case "captain":
+      return "6";
+    case "major":
+      return "7";
+    case "colonel":
+      return "8";
+    case "general":
+      return "9";
+    case "marshal":
+      return "10";
+    default:
+      return "?";
+  }
+}
+
+function formatRank(rank: Piece["rank"]): string {
+  return rank.charAt(0).toUpperCase() + rank.slice(1);
+}
+
+function extractSetupForPlayer(game: GameState, color: PlayerColor): Record<string, Piece> {
+  return Object.fromEntries(Object.entries(game.board).filter(([, piece]) => piece?.owner === color)) as Record<string, Piece>;
 }
 
 render();

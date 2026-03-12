@@ -147,6 +147,10 @@ button.secondary {
   line-height: 1.1;
 }
 
+.cell.setup-cell {
+  background: rgba(240, 231, 205, 0.96);
+}
+
 .cell.lake {
   background: linear-gradient(180deg, #8cc7db, #68a7bf);
   color: #103645;
@@ -169,6 +173,19 @@ button.secondary {
 
 .cell.selected {
   box-shadow: inset 0 0 0 3px var(--highlight);
+}
+
+.piece-rank {
+  display: block;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.piece-name {
+  display: block;
+  font-size: 0.64rem;
+  opacity: 0.92;
+  text-transform: capitalize;
 }
 
 .legend {

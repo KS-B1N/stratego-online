@@ -34,27 +34,76 @@ export function createPlayerArmy(player: PlayerColor): Piece[] {
   return pieces;
 }
 
+const DEFAULT_BACKLINE_TEMPLATE: PieceRank[][] = [
+  ["bomb", "bomb", "flag", "bomb", "bomb", "bomb", "bomb", "marshal", "general", "colonel"],
+  ["colonel", "major", "major", "major", "captain", "captain", "captain", "captain", "lieutenant", "lieutenant"],
+  ["lieutenant", "lieutenant", "sergeant", "sergeant", "sergeant", "sergeant", "miner", "miner", "miner", "miner"],
+  ["miner", "scout", "scout", "scout", "scout", "scout", "scout", "scout", "scout", "spy"]
+];
+
 export function generateDefaultSetup(player: PlayerColor): Record<string, Piece> {
-  const army = createPlayerArmy(player);
   const setup: Record<string, Piece> = {};
-  let pieceIndex = 0;
+  const piecesByRank = createPiecesByRank(player);
+  const templateRows = player === "blue" ? DEFAULT_BACKLINE_TEMPLATE : [...DEFAULT_BACKLINE_TEMPLATE].reverse();
+  const startRow = player === "blue" ? 0 : 6;
 
-  for (let row = 0; row < 10; row += 1) {
-    for (let col = 0; col < 10; col += 1) {
-      const cell: Cell = { row, col };
-      if (!isSetupCellForPlayer(player, cell)) {
-        continue;
-      }
-
-      const piece = army[pieceIndex];
+  for (let rowOffset = 0; rowOffset < templateRows.length; rowOffset += 1) {
+    const ranks = templateRows[rowOffset];
+    for (let col = 0; col < ranks.length; col += 1) {
+      const rank = ranks[col];
+      const piece = piecesByRank[rank].shift();
       if (!piece) {
-        return setup;
+        throw new Error(`Default template is missing a ${rank} for ${player}`);
       }
 
-      setup[cellKey(cell)] = piece;
-      pieceIndex += 1;
+      setup[cellKey({ row: startRow + rowOffset, col })] = piece;
     }
   }
 
   return setup;
+}
+
+export function serializeSetupPieces(setup: Record<string, Piece>): Record<string, string> {
+  return Object.fromEntries(Object.entries(setup).map(([cell, piece]) => [cell, piece.id]));
+}
+
+export function buildSetupFromSerialized(player: PlayerColor, serializedSetup: Record<string, string>): Record<string, Piece> {
+  const piecesById = new Map(createPlayerArmy(player).map((piece) => [piece.id, piece]));
+  const setup: Record<string, Piece> = {};
+  const usedPieceIds = new Set<string>();
+
+  for (const [key, pieceId] of Object.entries(serializedSetup)) {
+    const [row, col] = key.split(",").map(Number);
+    const cell: Cell = { row, col };
+
+    if (!isSetupCellForPlayer(player, cell)) {
+      throw new Error(`Invalid setup cell ${key} for ${player}`);
+    }
+
+    const piece = piecesById.get(pieceId);
+    if (!piece) {
+      throw new Error(`Unknown piece id ${pieceId}`);
+    }
+
+    if (usedPieceIds.has(pieceId)) {
+      throw new Error(`Duplicate piece id ${pieceId}`);
+    }
+
+    usedPieceIds.add(pieceId);
+    setup[key] = piece;
+  }
+
+  return setup;
+}
+
+function createPiecesByRank(player: PlayerColor): Record<PieceRank, Piece[]> {
+  const grouped = Object.fromEntries(
+    (Object.keys(DEFAULT_PIECE_COUNTS) as PieceRank[]).map((rank) => [rank, [] as Piece[]])
+  ) as Record<PieceRank, Piece[]>;
+
+  for (const piece of createPlayerArmy(player)) {
+    grouped[piece.rank].push(piece);
+  }
+
+  return grouped;
 }
