@@ -1,12 +1,14 @@
 import { createReadStream, existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ClientMessage } from "@stratego/game-core";
 import { WebSocketServer } from "ws";
 import { RoomManager } from "./roomManager.js";
 
 const port = Number(process.env.PORT ?? 3001);
-const webDistDir = join(process.cwd(), "apps", "web", "dist");
+const serverDir = fileURLToPath(new URL(".", import.meta.url));
+const webDistDir = join(serverDir, "..", "..", "web", "dist");
 
 const server = createServer((request, response) => {
   const url = request.url ?? "/";
