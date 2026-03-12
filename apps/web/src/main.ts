@@ -299,7 +299,7 @@ function describeUpdate(game: GameState, color?: PlayerColor): string {
 
 function resolveSocketUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.hostname}:3001`;
+  return `${protocol}//${window.location.host}`;
 }
 
 function send(message: ClientMessage): void {
