@@ -1,0 +1,21 @@
+{
+  "name": "stratego-online",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @stratego/web",
+    "dev:server": "npm run dev --workspace @stratego/server",
+    "dev:web": "npm run dev --workspace @stratego/web",
+    "typecheck": "npm run typecheck --workspace @stratego/game-core && npm run typecheck --workspace @stratego/server && npm run typecheck --workspace @stratego/web"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
