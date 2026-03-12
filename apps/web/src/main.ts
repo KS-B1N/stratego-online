@@ -361,10 +361,18 @@ function renderBoard(): string {
 function renderPiece(piece: Piece): string {
   const isMine = piece.owner === state.color;
   if (isMine || piece.revealed || state.game?.status !== "active") {
-    return `<span class="piece-rank">${getPieceLabel(piece)}</span><span class="piece-name">${formatRank(piece.rank)}</span>`;
+    return `
+      <span class="piece-value">${getPieceValue(piece)}</span>
+      <span class="piece-icon">${getPieceIcon(piece)}</span>
+      <span class="piece-name">${formatRank(piece.rank)}</span>
+    `;
   }
 
-  return "<span class=\"piece-rank\">?</span><span class=\"piece-name\">Hidden</span>";
+  return `
+    <span class="piece-value">?</span>
+    <span class="piece-icon">?</span>
+    <span class="piece-name">Hidden</span>
+  `;
 }
 
 function describeTurn(game?: GameState): string {
@@ -472,6 +480,30 @@ function getPieceLabel(piece: Piece): string {
       return "10";
     default:
       return "?";
+  }
+}
+
+function getPieceIcon(piece: Piece): string {
+  switch (piece.rank) {
+    case "flag":
+      return "⚑";
+    case "bomb":
+      return "✹";
+    case "spy":
+      return "◈";
+    default:
+      return getPieceLabel(piece);
+  }
+}
+
+function getPieceValue(piece: Piece): string {
+  switch (piece.rank) {
+    case "flag":
+      return "F";
+    case "bomb":
+      return "B";
+    default:
+      return getPieceLabel(piece);
   }
 }
 
