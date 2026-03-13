@@ -31,6 +31,10 @@ type ClientState = {
   game?: GameState;
   selectedCell?: string;
   validMoves: string[];
+  battleHighlight?: {
+    from: string;
+    to: string;
+  };
   selectedTemplateId: string;
   localSetup: Record<string, Piece>;
   setupLocked: boolean;
@@ -42,6 +46,7 @@ type ClientState = {
 const state: ClientState = {
   roomCode: "",
   playerName: "",
+  battleHighlight: undefined,
   selectedTemplateId: DEFAULT_SETUP_TEMPLATE_ID,
   localSetup: {},
   setupLocked: false,
@@ -54,6 +59,9 @@ const state: ClientState = {
 let transientMessageTimer: ReturnType<typeof setTimeout> | undefined;
 
 function render(): void {
+  const capturedSummary = state.game && state.color ? deriveCapturedSummary(state.game, state.color) : undefined;
+  const battleFeed = state.game ? deriveBattleFeed(state.game) : [];
+
   app.innerHTML = `
     <main class="shell">
       <section class="hero">
@@ -61,9 +69,10 @@ function render(): void {
           <h1>Stratego</h1>
           <p>Two-player online strategy with hidden information, room codes, and a shared rules engine.</p>
         </div>
-        <div class="panel">
+        <div class="panel status-panel">
           <strong>${state.color ? `You are ${state.color.toUpperCase()}` : "Not connected"}</strong>
-          <div>${describeTurn(state.game)}</div>
+          <div class="turn-chip ${getTurnTone(state.game, state.color)}">${describeTurn(state.game)}</div>
+          <div class="hero-meta">${describePhase(state.game, state.color)}</div>
         </div>
       </section>
 
@@ -104,6 +113,18 @@ function render(): void {
               <div>Winner: ${state.game?.winner ?? "-"}</div>
             </div>
           </div>
+
+          <div class="panel">
+            <h3>Captured</h3>
+            <div class="capture-section">
+              <strong>You took</strong>
+              <div class="capture-tray">${renderCaptureTray(capturedSummary?.capturedEnemyPieces ?? [])}</div>
+            </div>
+            <div class="capture-section">
+              <strong>You lost</strong>
+              <div class="capture-tray">${renderCaptureTray(capturedSummary?.lostOwnPieces ?? [])}</div>
+            </div>
+          </div>
         </aside>
 
         <section class="panel board-wrap">
@@ -117,6 +138,13 @@ function render(): void {
             <div>Enemy ranks stay hidden until revealed in combat.</div>
           </div>
         </section>
+
+        <aside class="stack">
+          <div class="panel">
+            <h3>Battle Feed</h3>
+            <div class="feed-list">${renderBattleFeed(battleFeed)}</div>
+          </div>
+        </aside>
       </section>
     </main>
   `;
@@ -314,6 +342,7 @@ function handleServerMessage(message: ServerMessage): void {
       state.roomCode = message.roomCode;
       state.color = message.color;
       state.game = message.game;
+      state.battleHighlight = undefined;
       state.localSetup = generateSetupFromTemplate(message.color, state.selectedTemplateId);
       state.setupLocked = false;
       state.lastSeenMoveCount = 0;
@@ -327,6 +356,7 @@ function handleServerMessage(message: ServerMessage): void {
       state.game = message.game;
       state.selectedCell = undefined;
       state.validMoves = [];
+      state.battleHighlight = getBattleHighlight(message.game);
       if (message.game.status === "setup" && state.color) {
         state.localSetup = {
           ...extractSetupForPlayer(message.game, state.color),
@@ -343,6 +373,9 @@ function handleServerMessage(message: ServerMessage): void {
       state.selectedCell = cellKey(message.from);
       state.validMoves = message.moves.map(cellKey);
       state.status = `Selected ${state.selectedCell}.`;
+      break;
+    case "combat_highlight_cleared":
+      state.battleHighlight = undefined;
       break;
     case "error":
       state.status = message.message;
@@ -368,6 +401,8 @@ function renderBoard(): string {
       const piece = getDisplayPiece(key);
       const selectable = state.validMoves.includes(key);
       const selected = state.selectedCell === key;
+      const battleHighlight =
+        state.battleHighlight?.from === key || state.battleHighlight?.to === key ? "battle-highlight" : "";
       const setupCell = Boolean(state.color && isSetupCellForPlayer(state.color, { row, col }));
 
       if (isLake({ row, col })) {
@@ -377,7 +412,7 @@ function renderBoard(): string {
 
       cells.push(`
         <button
-          class="cell ${piece?.owner ?? ""} ${setupCell ? "setup-cell" : ""} ${selectable ? "selectable" : ""} ${selected ? "selected" : ""}"
+          class="cell ${piece?.owner ?? ""} ${setupCell ? "setup-cell" : ""} ${selectable ? "selectable" : ""} ${selected ? "selected" : ""} ${battleHighlight}"
           data-key="${key}"
         >
           ${piece ? renderPiece(piece) : ""}
@@ -420,6 +455,22 @@ function describeTurn(game?: GameState): string {
   }
 
   return `Current turn: ${game.currentTurn}`;
+}
+
+function describePhase(game?: GameState, color?: PlayerColor): string {
+  if (!game) {
+    return "Waiting for connection";
+  }
+
+  if (game.status === "finished") {
+    return game.winner === color ? "Victory" : "Defeat";
+  }
+
+  if (game.status === "setup") {
+    return color ? `${color.toUpperCase()} setup zone active` : "Setup phase";
+  }
+
+  return game.currentTurn === color ? "Select a piece to move" : "Watching opponent turn";
 }
 
 function describeUpdate(game: GameState, color?: PlayerColor): string {
@@ -555,6 +606,139 @@ function renderTemplateOptions(): string {
 
 function getSelectedTemplate(): (typeof SETUP_TEMPLATES)[number] {
   return SETUP_TEMPLATES.find((template) => template.id === state.selectedTemplateId) ?? SETUP_TEMPLATES[0];
+}
+
+function deriveCapturedSummary(game: GameState, color: PlayerColor): {
+  capturedEnemyPieces: Piece["rank"][];
+  lostOwnPieces: Piece["rank"][];
+} {
+  const capturedEnemyPieces: Piece["rank"][] = [];
+  const lostOwnPieces: Piece["rank"][] = [];
+
+  for (const move of game.moveHistory) {
+    const { outcome } = move;
+
+    switch (outcome.type) {
+      case "captured":
+        if (outcome.winner.owner === color) {
+          capturedEnemyPieces.push(outcome.loser.rank);
+        } else {
+          lostOwnPieces.push(outcome.loser.rank);
+        }
+        break;
+      case "trade":
+        if (outcome.attacker.owner === color) {
+          lostOwnPieces.push(outcome.attacker.rank);
+          capturedEnemyPieces.push(outcome.defender.rank);
+        } else {
+          capturedEnemyPieces.push(outcome.attacker.rank);
+          lostOwnPieces.push(outcome.defender.rank);
+        }
+        break;
+      case "flag":
+        if (outcome.winner === color) {
+          capturedEnemyPieces.push("flag");
+        } else {
+          lostOwnPieces.push("flag");
+        }
+        break;
+      case "moved":
+        break;
+      default:
+        break;
+    }
+  }
+
+  return {
+    capturedEnemyPieces,
+    lostOwnPieces
+  };
+}
+
+function deriveBattleFeed(game: GameState): string[] {
+  return game.moveHistory
+    .slice(-8)
+    .reverse()
+    .map((move) => {
+      const from = formatBoardCell(move.from);
+      const to = formatBoardCell(move.to);
+
+      switch (move.outcome.type) {
+        case "captured":
+          return `${formatRank(move.outcome.winner.rank)} won at ${to}`;
+        case "trade":
+          return `${formatRank(move.outcome.attacker.rank)} and ${formatRank(move.outcome.defender.rank)} traded at ${to}`;
+        case "flag":
+          return `${formatRank(move.outcome.attacker.rank)} captured the Flag at ${to}`;
+        case "moved":
+          return `Move ${from} to ${to}`;
+        default:
+          return `${from} to ${to}`;
+      }
+    });
+}
+
+function renderCaptureTray(ranks: Piece["rank"][]): string {
+  if (ranks.length === 0) {
+    return `<span class="muted-inline">None yet</span>`;
+  }
+
+  return ranks
+    .map((rank) => `<span class="capture-pill">${escapeHtml(getRankBadge(rank))}</span>`)
+    .join("");
+}
+
+function renderBattleFeed(feed: string[]): string {
+  if (feed.length === 0) {
+    return `<div class="muted-inline">No battles yet.</div>`;
+  }
+
+  return feed.map((entry) => `<div class="feed-item">${escapeHtml(entry)}</div>`).join("");
+}
+
+function getTurnTone(game?: GameState, color?: PlayerColor): string {
+  if (!game) {
+    return "idle";
+  }
+
+  if (game.status === "finished") {
+    return game.winner === color ? "good" : "warn";
+  }
+
+  if (game.status === "setup") {
+    return "setup";
+  }
+
+  return game.currentTurn === color ? "good" : "idle";
+}
+
+function formatBoardCell(cell: { row: number; col: number }): string {
+  return `${String.fromCharCode(65 + cell.col)}${10 - cell.row}`;
+}
+
+function getRankBadge(rank: Piece["rank"]): string {
+  switch (rank) {
+    case "flag":
+      return "Flag";
+    case "bomb":
+      return "Bomb";
+    case "spy":
+      return "Spy";
+    default:
+      return formatRank(rank);
+  }
+}
+
+function getBattleHighlight(game: GameState): { from: string; to: string } | undefined {
+  const lastMove = game.moveHistory.at(-1);
+  if (!lastMove || lastMove.outcome.type === "moved") {
+    return undefined;
+  }
+
+  return {
+    from: cellKey(lastMove.from),
+    to: cellKey(lastMove.to)
+  };
 }
 
 function queueTransientCombatMessage(game: GameState): void {

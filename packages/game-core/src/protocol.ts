@@ -40,6 +40,9 @@ export type ServerMessage =
       moves: Cell[];
     }
   | {
+      type: "combat_highlight_cleared";
+    }
+  | {
       type: "error";
       message: string;
     };

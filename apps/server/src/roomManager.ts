@@ -88,6 +88,11 @@ export class RoomManager {
     switch (message.type) {
       case "request_moves": {
         assertPlayerControlsCell(room.game, session.color, message.from);
+        if (hasActiveCombatHighlight(room.game)) {
+          this.broadcastRoom(room, {
+            type: "combat_highlight_cleared"
+          });
+        }
         send(session.socket, {
           type: "valid_moves",
           from: message.from,
@@ -210,4 +215,9 @@ function replacePlayerSetup(
     ...Object.fromEntries(preservedEntries),
     ...setup
   };
+}
+
+function hasActiveCombatHighlight(game: GameState): boolean {
+  const lastMove = game.moveHistory.at(-1);
+  return Boolean(lastMove && lastMove.outcome.type !== "moved");
 }
