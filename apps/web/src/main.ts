@@ -132,11 +132,6 @@ function render(): void {
           <div class="board">
             ${renderBoard()}
           </div>
-          <div class="legend">
-            <div>Choose a template, then click pieces to swap them before locking setup.</div>
-            <div>Lake cells block movement.</div>
-            <div>Enemy ranks stay hidden until revealed in combat.</div>
-          </div>
         </section>
 
         <aside class="stack">
