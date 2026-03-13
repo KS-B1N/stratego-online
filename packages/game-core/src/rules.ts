@@ -249,7 +249,7 @@ export function applyMove(game: GameState, move: Move): GameState {
     outcome = compareRanks(attacker, defender);
 
     if (outcome.type === "captured") {
-      nextBoard[toKey] = outcome.winner.id === attacker.id ? outcome.winner : undefined;
+      nextBoard[toKey] = outcome.winner;
     }
 
     if (outcome.type === "trade") {
