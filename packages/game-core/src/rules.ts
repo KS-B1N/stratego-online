@@ -179,6 +179,14 @@ function compareRanks(attacker: Piece, defender: Piece): Outcome {
     };
   }
 
+  if (defender.rank === "spy") {
+    return {
+      type: "captured",
+      winner: { ...attacker, revealed: true },
+      loser: { ...defender, revealed: true }
+    };
+  }
+
   if (attacker.rank === "spy" && defender.rank === "marshal") {
     return {
       type: "captured",
