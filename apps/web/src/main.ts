@@ -458,7 +458,7 @@ function escapeHtml(value: string): string {
 
 function getDisplayPiece(key: string): Piece | undefined {
   if (state.game?.status === "setup" && state.color) {
-    return state.localSetup[key] ?? state.game.board[key];
+    return state.localSetup[key];
   }
 
   return state.game?.board[key];
