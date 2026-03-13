@@ -28,7 +28,7 @@ body {
 }
 
 .shell {
-  max-width: 1180px;
+  max-width: 1480px;
   margin: 0 auto;
   padding: 32px 20px 48px;
 }
@@ -56,8 +56,9 @@ body {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(260px, 320px) 1fr minmax(220px, 280px);
+  grid-template-columns: minmax(240px, 300px) minmax(760px, 1.45fr) minmax(200px, 240px);
   gap: 20px;
+  align-items: start;
 }
 
 .panel {
@@ -176,6 +177,8 @@ button.secondary {
   background: rgba(75, 54, 38, 0.18);
   padding: 8px;
   border-radius: 20px;
+  width: min(100%, 920px);
+  justify-self: center;
 }
 
 .cell {
@@ -314,6 +317,10 @@ button.secondary {
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;
+  }
+
+  .board {
+    width: 100%;
   }
 
   .hero {
