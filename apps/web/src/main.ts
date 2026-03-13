@@ -34,6 +34,7 @@ type ClientState = {
   battleHighlight?: {
     from: string;
     to: string;
+    tone: "move" | "battle";
   };
   selectedTemplateId: string;
   localSetup: Record<string, Piece>;
@@ -61,6 +62,10 @@ let transientMessageTimer: ReturnType<typeof setTimeout> | undefined;
 function render(): void {
   const capturedSummary = state.game && state.color ? deriveCapturedSummary(state.game, state.color) : undefined;
   const battleFeed = state.game ? deriveBattleFeed(state.game) : [];
+  const lastAction = state.game ? describeLastAction(state.game) : undefined;
+  const isYourTurn = Boolean(
+    state.game && state.color && state.game.status === "active" && state.game.currentTurn === state.color
+  );
 
   app.innerHTML = `
     <main class="shell">
@@ -73,6 +78,7 @@ function render(): void {
           <strong>${state.color ? `You are ${state.color.toUpperCase()}` : "Not connected"}</strong>
           <div class="turn-chip ${getTurnTone(state.game, state.color)}">${describeTurn(state.game)}</div>
           <div class="hero-meta">${describePhase(state.game, state.color)}</div>
+          ${isYourTurn ? `<div class="turn-alert">Your turn</div>` : ""}
         </div>
       </section>
 
@@ -127,8 +133,9 @@ function render(): void {
           </div>
         </aside>
 
-        <section class="panel board-wrap">
+        <section class="panel board-wrap ${isYourTurn ? "your-turn-panel" : ""}">
           <h2>Battlefield</h2>
+          ${lastAction ? `<div class="last-action">${escapeHtml(lastAction)}</div>` : ""}
           <div class="board">
             ${renderBoard()}
           </div>
@@ -351,7 +358,7 @@ function handleServerMessage(message: ServerMessage): void {
       state.game = message.game;
       state.selectedCell = undefined;
       state.validMoves = [];
-      state.battleHighlight = getBattleHighlight(message.game);
+      state.battleHighlight = getLastMoveHighlight(message.game);
       if (message.game.status === "setup" && state.color) {
         state.localSetup = {
           ...extractSetupForPlayer(message.game, state.color),
@@ -397,7 +404,11 @@ function renderBoard(): string {
       const selectable = state.validMoves.includes(key);
       const selected = state.selectedCell === key;
       const battleHighlight =
-        state.battleHighlight?.from === key || state.battleHighlight?.to === key ? "battle-highlight" : "";
+        state.battleHighlight?.from === key || state.battleHighlight?.to === key
+          ? state.battleHighlight.tone === "battle"
+            ? "battle-highlight"
+            : "move-highlight"
+          : "";
       const setupCell = Boolean(state.color && isSetupCellForPlayer(state.color, { row, col }));
 
       if (isLake({ row, col })) {
@@ -660,13 +671,13 @@ function deriveBattleFeed(game: GameState): string[] {
 
       switch (move.outcome.type) {
         case "captured":
-          return `${formatRank(move.outcome.winner.rank)} won at ${to}`;
+          return `${formatRank(move.outcome.winner.rank)} took ${formatRank(move.outcome.loser.rank)} at ${to}`;
         case "trade":
           return `${formatRank(move.outcome.attacker.rank)} and ${formatRank(move.outcome.defender.rank)} traded at ${to}`;
         case "flag":
           return `${formatRank(move.outcome.attacker.rank)} captured the Flag at ${to}`;
         case "moved":
-          return `Move ${from} to ${to}`;
+          return `Moved ${from} to ${to}`;
         default:
           return `${from} to ${to}`;
       }
@@ -707,6 +718,27 @@ function getTurnTone(game?: GameState, color?: PlayerColor): string {
   return game.currentTurn === color ? "good" : "idle";
 }
 
+function describeLastAction(game: GameState): string | undefined {
+  const lastMove = game.moveHistory.at(-1);
+  if (!lastMove) {
+    return undefined;
+  }
+
+  const to = formatBoardCell(lastMove.to);
+  switch (lastMove.outcome.type) {
+    case "captured":
+      return `${formatRank(lastMove.outcome.winner.rank)} took ${formatRank(lastMove.outcome.loser.rank)} at ${to}`;
+    case "trade":
+      return `${formatRank(lastMove.outcome.attacker.rank)} traded with ${formatRank(lastMove.outcome.defender.rank)} at ${to}`;
+    case "flag":
+      return `${formatRank(lastMove.outcome.attacker.rank)} captured the Flag at ${to}`;
+    case "moved":
+      return `Last move: ${formatBoardCell(lastMove.from)} to ${to}`;
+    default:
+      return undefined;
+  }
+}
+
 function formatBoardCell(cell: { row: number; col: number }): string {
   return `${String.fromCharCode(65 + cell.col)}${10 - cell.row}`;
 }
@@ -724,15 +756,16 @@ function getRankBadge(rank: Piece["rank"]): string {
   }
 }
 
-function getBattleHighlight(game: GameState): { from: string; to: string } | undefined {
+function getLastMoveHighlight(game: GameState): { from: string; to: string; tone: "move" | "battle" } | undefined {
   const lastMove = game.moveHistory.at(-1);
-  if (!lastMove || lastMove.outcome.type === "moved") {
+  if (!lastMove) {
     return undefined;
   }
 
   return {
     from: cellKey(lastMove.from),
-    to: cellKey(lastMove.to)
+    to: cellKey(lastMove.to),
+    tone: lastMove.outcome.type === "moved" ? "move" : "battle"
   };
 }
 
