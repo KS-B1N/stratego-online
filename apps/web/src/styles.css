@@ -84,12 +84,19 @@ body {
   gap: 6px;
 }
 
-.field input {
+.field input,
+.field select {
   width: 100%;
   padding: 12px 14px;
   border-radius: 12px;
   border: 1px solid var(--panel-border);
   font: inherit;
+  background: white;
+}
+
+.template-copy {
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .actions {

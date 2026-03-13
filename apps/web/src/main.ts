@@ -1,12 +1,14 @@
 import {
   BOARD_SIZE,
   ClientMessage,
+  DEFAULT_SETUP_TEMPLATE_ID,
   GameState,
   Piece,
   PlayerColor,
+  SETUP_TEMPLATES,
   ServerMessage,
   cellKey,
-  generateDefaultSetup,
+  generateSetupFromTemplate,
   isLake,
   isSetupCellForPlayer,
   serializeSetupPieces
@@ -29,6 +31,7 @@ type ClientState = {
   game?: GameState;
   selectedCell?: string;
   validMoves: string[];
+  selectedTemplateId: string;
   localSetup: Record<string, Piece>;
   setupLocked: boolean;
   status: string;
@@ -37,6 +40,7 @@ type ClientState = {
 const state: ClientState = {
   roomCode: "",
   playerName: "",
+  selectedTemplateId: DEFAULT_SETUP_TEMPLATE_ID,
   localSetup: {},
   setupLocked: false,
   validMoves: [],
@@ -70,6 +74,11 @@ function render(): void {
                 <span>Room code</span>
                 <input id="roomCode" placeholder="Auto-generate if blank" value="${escapeHtml(state.roomCode)}" />
               </label>
+              <label class="field">
+                <span>Setup template</span>
+                <select id="templateSelect">${renderTemplateOptions()}</select>
+              </label>
+              <div class="template-copy">${escapeHtml(getSelectedTemplate().description)}</div>
               <div class="actions">
                 <button id="joinButton">Join room</button>
                 <button id="lockButton" class="secondary">${state.setupLocked ? "Setup locked" : "Lock setup"}</button>
@@ -96,9 +105,9 @@ function render(): void {
             ${renderBoard()}
           </div>
           <div class="legend">
+            <div>Choose a template, then click pieces to swap them before locking setup.</div>
             <div>Lake cells block movement.</div>
             <div>Enemy ranks stay hidden until revealed in combat.</div>
-            <div>Scout pieces move any distance in a straight line.</div>
           </div>
         </section>
       </section>
@@ -117,6 +126,15 @@ function bindEvents(): void {
   });
   document.querySelector<HTMLInputElement>("#roomCode")?.addEventListener("input", (event) => {
     state.roomCode = (event.target as HTMLInputElement).value.toUpperCase();
+  });
+  document.querySelector<HTMLSelectElement>("#templateSelect")?.addEventListener("change", (event) => {
+    state.selectedTemplateId = (event.target as HTMLSelectElement).value;
+    if (state.color && !state.setupLocked) {
+      state.localSetup = generateSetupFromTemplate(state.color, state.selectedTemplateId);
+      state.selectedCell = undefined;
+      state.status = `Loaded ${getSelectedTemplate().name}.`;
+    }
+    render();
   });
 
   document.querySelectorAll<HTMLButtonElement>(".cell[data-key]").forEach((button) => {
@@ -277,9 +295,9 @@ function resetSetupTemplate(): void {
     return;
   }
 
-  state.localSetup = generateDefaultSetup(state.color);
+  state.localSetup = generateSetupFromTemplate(state.color, state.selectedTemplateId);
   state.selectedCell = undefined;
-  state.status = "Reset to the default setup template.";
+  state.status = `Reset to ${getSelectedTemplate().name}.`;
   render();
 }
 
@@ -289,7 +307,7 @@ function handleServerMessage(message: ServerMessage): void {
       state.roomCode = message.roomCode;
       state.color = message.color;
       state.game = message.game;
-      state.localSetup = generateDefaultSetup(message.color);
+      state.localSetup = generateSetupFromTemplate(message.color, state.selectedTemplateId);
       state.setupLocked = false;
       state.status = `Joined room ${message.roomCode}.`;
       break;
@@ -318,6 +336,9 @@ function handleServerMessage(message: ServerMessage): void {
       break;
     case "error":
       state.status = message.message;
+      if (state.game?.status === "setup") {
+        state.setupLocked = false;
+      }
       break;
     default: {
       const exhaustiveCheck: never = message;
@@ -385,7 +406,7 @@ function describeTurn(game?: GameState): string {
   }
 
   if (game.status === "setup") {
-    return "Lock setup from both clients to begin.";
+    return "Choose a template, rearrange pieces, then lock setup.";
   }
 
   return `Current turn: ${game.currentTurn}`;
@@ -397,7 +418,7 @@ function describeUpdate(game: GameState, color?: PlayerColor): string {
   }
 
   if (game.status === "setup") {
-    return state.setupLocked ? "Waiting for the other player to lock a setup." : "Arrange your pieces, then lock setup.";
+    return state.setupLocked ? "Waiting for the other player to lock a setup." : "Pick a template or swap pieces, then lock setup.";
   }
 
   return game.currentTurn === color ? "Your move." : "Opponent's move.";
@@ -486,11 +507,11 @@ function getPieceLabel(piece: Piece): string {
 function getPieceIcon(piece: Piece): string {
   switch (piece.rank) {
     case "flag":
-      return "⚑";
+      return "[]";
     case "bomb":
-      return "✹";
+      return "*";
     case "spy":
-      return "◈";
+      return "<>";
     default:
       return getPieceLabel(piece);
   }
@@ -513,6 +534,17 @@ function formatRank(rank: Piece["rank"]): string {
 
 function extractSetupForPlayer(game: GameState, color: PlayerColor): Record<string, Piece> {
   return Object.fromEntries(Object.entries(game.board).filter(([, piece]) => piece?.owner === color)) as Record<string, Piece>;
+}
+
+function renderTemplateOptions(): string {
+  return SETUP_TEMPLATES.map((template) => {
+    const selected = template.id === state.selectedTemplateId ? "selected" : "";
+    return `<option value="${template.id}" ${selected}>${escapeHtml(template.name)}</option>`;
+  }).join("");
+}
+
+function getSelectedTemplate(): (typeof SETUP_TEMPLATES)[number] {
+  return SETUP_TEMPLATES.find((template) => template.id === state.selectedTemplateId) ?? SETUP_TEMPLATES[0];
 }
 
 render();
