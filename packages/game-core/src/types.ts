@@ -1,13 +1,13 @@
 export const BOARD_SIZE = 10;
 export const LAKE_CELLS = new Set([
-  "2,4",
-  "2,5",
-  "3,4",
-  "3,5",
-  "6,4",
-  "6,5",
-  "7,4",
-  "7,5"
+  "4,2",
+  "4,3",
+  "5,2",
+  "5,3",
+  "4,6",
+  "4,7",
+  "5,6",
+  "5,7"
 ]);
 
 export type PlayerColor = "red" | "blue";
