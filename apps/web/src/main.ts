@@ -34,6 +34,8 @@ type ClientState = {
   selectedTemplateId: string;
   localSetup: Record<string, Piece>;
   setupLocked: boolean;
+  lastSeenMoveCount: number;
+  transientMessage?: string;
   status: string;
 };
 
@@ -43,9 +45,13 @@ const state: ClientState = {
   selectedTemplateId: DEFAULT_SETUP_TEMPLATE_ID,
   localSetup: {},
   setupLocked: false,
+  lastSeenMoveCount: 0,
+  transientMessage: undefined,
   validMoves: [],
   status: "Join a room to start."
 };
+
+let transientMessageTimer: ReturnType<typeof setTimeout> | undefined;
 
 function render(): void {
   app.innerHTML = `
@@ -85,6 +91,7 @@ function render(): void {
                 <button id="resetButton" class="secondary">Reset template</button>
               </div>
               <div class="status">${escapeHtml(state.status)}</div>
+              <div class="status">${escapeHtml(state.transientMessage ?? "")}</div>
             </div>
           </div>
 
@@ -309,6 +316,8 @@ function handleServerMessage(message: ServerMessage): void {
       state.game = message.game;
       state.localSetup = generateSetupFromTemplate(message.color, state.selectedTemplateId);
       state.setupLocked = false;
+      state.lastSeenMoveCount = 0;
+      state.transientMessage = undefined;
       state.status = `Joined room ${message.roomCode}.`;
       break;
     case "room_waiting":
@@ -327,6 +336,7 @@ function handleServerMessage(message: ServerMessage): void {
       if (message.game.status === "active") {
         state.setupLocked = true;
       }
+      queueTransientCombatMessage(message.game);
       state.status = describeUpdate(message.game, state.color);
       break;
     case "valid_moves":
@@ -381,7 +391,7 @@ function renderBoard(): string {
 
 function renderPiece(piece: Piece): string {
   const isMine = piece.owner === state.color;
-  if (isMine || piece.revealed || state.game?.status !== "active") {
+  if (state.game?.status !== "active" || isMine) {
     return `
       <span class="piece-value">${getPieceValue(piece)}</span>
       <span class="piece-icon">${getPieceIcon(piece)}</span>
@@ -545,6 +555,45 @@ function renderTemplateOptions(): string {
 
 function getSelectedTemplate(): (typeof SETUP_TEMPLATES)[number] {
   return SETUP_TEMPLATES.find((template) => template.id === state.selectedTemplateId) ?? SETUP_TEMPLATES[0];
+}
+
+function queueTransientCombatMessage(game: GameState): void {
+  if (game.moveHistory.length === state.lastSeenMoveCount) {
+    return;
+  }
+
+  state.lastSeenMoveCount = game.moveHistory.length;
+  const lastMove = game.moveHistory.at(-1);
+  if (!lastMove || lastMove.outcome.type === "moved") {
+    return;
+  }
+
+  const message = describeCombatOutcome(lastMove.outcome);
+  state.transientMessage = message;
+
+  if (transientMessageTimer) {
+    clearTimeout(transientMessageTimer);
+  }
+
+  transientMessageTimer = setTimeout(() => {
+    state.transientMessage = undefined;
+    render();
+  }, 3500);
+}
+
+function describeCombatOutcome(outcome: GameState["moveHistory"][number]["outcome"]): string {
+  switch (outcome.type) {
+    case "captured":
+      return `${formatRank(outcome.winner.rank)} defeated ${formatRank(outcome.loser.rank)}.`;
+    case "trade":
+      return `${formatRank(outcome.attacker.rank)} traded with ${formatRank(outcome.defender.rank)}.`;
+    case "flag":
+      return `${formatRank(outcome.attacker.rank)} captured the Flag.`;
+    case "moved":
+      return "";
+    default:
+      return "";
+  }
 }
 
 render();
